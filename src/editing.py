@@ -83,18 +83,75 @@ def keep_ranges(moment: dict[str, Any], video_duration: float) -> list[tuple[flo
     if not config.EDIT_JUMP_CUTS:
         return [(start, end)]
 
-    # Leading silence counts as a silence too.
-    if words[0][0] - start > gap_min:
-        start = words[0][0] - pad
-    ranges: list[list[float]] = [[start, words[0][1]]]
+    # Speech gaps longer than gap_min; their interior keeps `pad` around words.
+    gaps: list[tuple[float, float]] = []
+    if words[0][0] - start > gap_min:                      # leading silence
+        gaps.append((start, words[0][0] - pad))
+    spoken_until = words[0][1]
     for a, b in words[1:]:
-        if a - ranges[-1][1] > gap_min:          # long silence -> cut it
-            ranges[-1][1] += pad
-            ranges.append([a - pad, b])
+        if a - spoken_until > gap_min:
+            gaps.append((spoken_until + pad, a - pad))
+        spoken_until = max(spoken_until, b)
+
+    # Decide what to remove inside each gap.
+    min_cut = gap_min - 2 * pad          # same minimum as a plain 0.5 s silence
+    cuts: list[tuple[float, float]] = []
+    for g0, g1 in gaps:
+        if g1 <= g0:
+            continue
+        if config.JUMP_CUT_SMART:
+            # Only quiet stretches go; loud parts are gameplay action.
+            cuts += [(r0, r1) for r0, r1 in quiet_runs(g0, g1) if r1 - r0 >= min_cut]
         else:
-            ranges[-1][1] = max(ranges[-1][1], b)
-    ranges[-1][1] = max(ranges[-1][1], end) if not config.EDIT_CLEAN_ENDING else end
-    return [(a, b) for a, b in ranges if b > a]
+            cuts.append((g0, g1))
+
+    keep: list[tuple[float, float]] = []
+    cur = start
+    for c0, c1 in sorted(cuts):
+        if c0 > cur:
+            keep.append((cur, c0))
+        cur = max(cur, c1)
+    if end > cur:
+        keep.append((cur, end))
+    return keep
+
+
+def quiet_runs(a: float, b: float) -> list[tuple[float, float]]:
+    """Stretches inside [a, b] where every JUMP_CUT_WINDOW window of the audio
+    is quieter than JUMP_CUT_QUIET_DB (RMS, dBFS)."""
+    if not config.AUDIO_WAV.is_file():
+        return [(a, b)]                   # no audio analysis possible: plain cut
+    win = config.JUMP_CUT_WINDOW
+    samples, rate = _read_audio(a, b)
+    n = int(len(samples) / (rate * win))
+    if n == 0:
+        return []
+    w = int(rate * win)
+    rms = np.sqrt(np.mean(samples[: n * w].reshape(n, w) ** 2, axis=1))
+    quiet = list(20 * np.log10(rms + 1e-9) < config.JUMP_CUT_QUIET_DB)
+    # Short loud bursts (footsteps, clicks) are not action: treat them as quiet
+    # when they sit between quiet windows, so they do not leave tiny slivers.
+    max_burst = int(round(config.JUMP_CUT_IGNORE_BURST / win))
+    i = 0
+    while i < n:
+        if not quiet[i]:
+            j = i
+            while j < n and not quiet[j]:
+                j += 1
+            if 0 < i and j < n and j - i <= max_burst:
+                quiet[i:j] = [True] * (j - i)
+            i = j
+        else:
+            i += 1
+    runs: list[tuple[float, float]] = []
+    run_start: int | None = None
+    for i, q in enumerate(quiet + [False]):
+        if q and run_start is None:
+            run_start = i
+        elif not q and run_start is not None:
+            runs.append((a + run_start * win, min(b, a + i * win)))
+            run_start = None
+    return runs
 
 
 def frame_align(ranges: list[tuple[float, float]], fps: float) -> tuple[float, list[tuple[float, float]]]:

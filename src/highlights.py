@@ -294,9 +294,154 @@ def clean_text(value: Any, max_words: int | None = None) -> str:
     return text
 
 
+# ---------------------------------------------------------------------------
+# Sentence-aware boundaries
+# ---------------------------------------------------------------------------
+
+# Words that (almost) never end an English sentence.
+NON_FINAL_WORDS = {
+    "a", "an", "the", "and", "or", "but", "so", "because", "if", "when", "while", "to",
+    "of", "for", "with", "at", "in", "on", "from", "by", "as", "than", "that", "which",
+    "who", "my", "your", "his", "her", "our", "their", "its", "this", "these", "those",
+    "i", "i'm", "you're", "we're", "they're", "he's", "she's", "it's", "gotta", "gonna",
+    "wanna", "is", "are", "was", "were", "be", "been", "am", "do", "does", "did", "have",
+    "has", "had", "can", "could", "will", "would", "should", "just", "about", "into",
+    "like", "what's", "there's", "let's", "y'all", "ain't", "don't", "can't", "won't",
+    "some", "any", "every", "very", "really", "not",
+}
+
+
+def sentence_words(transcript: dict[str, Any]) -> list[dict[str, Any]]:
+    """All transcript words (sub-word pieces merged) with sentence flags.
+
+    A word ends a sentence if it ends with . ! ? , is the last word of a
+    Whisper segment, or is followed by a pause > config.SENTENCE_GAP.
+    """
+    words: list[dict[str, Any]] = []
+    for seg in transcript["segments"]:
+        ws = _words_in(seg.get("words") or [], -1e9, 1e9)
+        if ws:
+            ws[-1]["seg_end"] = True
+        words += ws
+    words.sort(key=lambda w: w["start"])
+    for i, w in enumerate(words):
+        nxt = words[i + 1]["start"] if i + 1 < len(words) else None
+        punctuated = bool(re.search(r"[.!?][\"')\]]*$", w["word"]))
+        # Whisper often ends a segment mid-sentence ("know when to | get off"),
+        # so a segment end / pause only counts after a word that can end one.
+        # Whisper capitalises a new sentence, so the next word must start upper-case.
+        can_end = re.sub(r"[^\w']", "", w["word"]).lower() not in NON_FINAL_WORDS
+        next_upper = nxt is None or words[i + 1]["word"][:1].isupper()
+        boundary = bool(w.get("seg_end")) or nxt is None or nxt - w["end"] > config.SENTENCE_GAP
+        w["sent_end"] = punctuated or (boundary and can_end and next_upper) or nxt is None
+    for i, w in enumerate(words):
+        w["sent_start"] = i == 0 or words[i - 1]["sent_end"]
+    return words
+
+
+def snap_to_sentences(start: float, end: float, words: list[dict[str, Any]],
+                      duration: float) -> tuple[float, float]:
+    """Move start to a sentence start and end to a sentence end, keeping the
+    moment 20-60 s if possible and moving each boundary by at most
+    SENTENCE_MAX_SHIFT s when there is a choice."""
+    idx = [i for i, w in enumerate(words) if start <= (w["start"] + w["end"]) / 2 <= end]
+    if not idx:
+        return start, end
+    f, l = idx[0], idx[-1]
+    lo, hi, shift = config.MOMENT_MIN_SECONDS, config.MOMENT_MAX_SECONDS, config.SENTENCE_MAX_SHIFT
+
+    def span(a: int, b: int) -> float:
+        return (words[b]["end"] + PAD_AFTER) - (words[a]["start"] - PAD_BEFORE)
+
+    def prev_start(i: int) -> int | None:
+        return next((k for k in range(i, -1, -1) if words[k]["sent_start"]), None)
+
+    def next_end(i: int) -> int | None:
+        return next((k for k in range(i, len(words)) if words[k]["sent_end"]), None)
+
+    # Start: back to the sentence start (preferred) or forward to the next one.
+    if not words[f]["sent_start"]:
+        back = prev_start(f)
+        fwd = next((k for k in range(f + 1, l + 1) if words[k]["sent_start"]), None)
+        if back is not None and words[f]["start"] - words[back]["start"] <= shift and span(back, l) <= hi:
+            f = back
+        elif fwd is not None and span(fwd, l) >= lo:
+            f = fwd
+        elif back is not None and span(back, l) <= hi:
+            f = back
+    # End: forward to the sentence end (preferred) or back to the previous one.
+    if not words[l]["sent_end"]:
+        fwd = next_end(l)
+        back = next((k for k in range(l - 1, f - 1, -1) if words[k]["sent_end"]), None)
+        if fwd is not None and words[fwd]["end"] - words[l]["end"] <= shift and span(f, fwd) <= hi:
+            l = fwd
+        elif back is not None and span(f, back) >= lo:
+            l = back
+        elif fwd is not None and span(f, fwd) <= hi:
+            l = fwd
+    # Keep 20-60 s: add whole sentences (after, then before) or drop from the end.
+    while span(f, l) < lo:
+        nxt = next_end(l + 1) if l + 1 < len(words) else None
+        if nxt is not None and span(f, nxt) <= hi:
+            l = nxt
+            continue
+        prv = prev_start(f - 1) if f > 0 else None
+        if prv is not None and span(prv, l) <= hi:
+            f = prv
+            continue
+        break
+    while span(f, l) > hi:
+        back = next((k for k in range(l - 1, f - 1, -1) if words[k]["sent_end"]), None)
+        if back is None:
+            break
+        l = back
+
+    # Pad around the boundary words, but never into the neighbouring words
+    # (and never past the boundary word itself when words touch).
+    new_start = max(0.0, words[f]["start"] - PAD_BEFORE)
+    if f > 0:
+        new_start = max(new_start, min(words[f - 1]["end"] + 0.05, words[f]["start"]))
+    new_end = min(duration, words[l]["end"] + PAD_AFTER)
+    if l + 1 < len(words):
+        new_end = min(new_end, max(words[l + 1]["start"] - 0.05, words[l]["end"]))
+    return round(new_start, 2), round(new_end, 2)
+
+
+def rebuild_words(moment: dict[str, Any], new_start: float, new_end: float,
+                  words: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Words for the new range: the moment's own (possibly hand-edited) words
+    where the ranges overlap, transcript words for the newly added parts."""
+    old_s, old_e = float(moment["start"]), float(moment["end"])
+    mid = lambda w: (float(w["start"]) + float(w["end"])) / 2  # noqa: E731
+    kept = [w for w in moment.get("words", []) if new_start <= mid(w) <= new_end]
+    added = [{"start": w["start"], "end": w["end"], "word": w["word"]}
+             for w in words if new_start <= mid(w) <= new_end and not old_s <= mid(w) <= old_e]
+    return sorted(kept + added, key=lambda w: float(w["start"]))
+
+
+def fix_boundaries(data: dict[str, Any], transcript: dict[str, Any]) -> list[str]:
+    """Apply sentence-aware boundaries to every moment in place; return a report."""
+    words = sentence_words(transcript)
+    duration = float(transcript["duration"])
+    report = []
+    for m in data["moments"]:
+        s, e = snap_to_sentences(float(m["start"]), float(m["end"]), words, duration)
+        if (s, e) == (float(m["start"]), float(m["end"])):
+            report.append(f"#{m['id']:>2}: unchanged")
+            continue
+        old = (float(m["start"]), float(m["end"]))
+        m["words"] = rebuild_words(m, s, e, words)
+        m["start"], m["end"], m["duration"] = s, e, round(e - s, 2)
+        last = " ".join(w["word"] for w in m["words"][-4:])
+        report.append(f"#{m['id']:>2}: {old[0]:.1f}-{old[1]:.1f} ({old[1] - old[0]:.1f}s) -> "
+                      f"{s:.1f}-{e:.1f} ({e - s:.1f}s)  ends: ...{last}")
+    return report
+
+
 def postprocess(raw_moments: list[dict[str, Any]], transcript: dict[str, Any]) -> list[dict[str, Any]]:
     duration = float(transcript["duration"])
     all_words = [w for s in transcript["segments"] for w in s.get("words", [])]
+    sentences = sentence_words(transcript)
 
     candidates: list[dict[str, Any]] = []
     for m in raw_moments:
@@ -304,6 +449,7 @@ def postprocess(raw_moments: list[dict[str, Any]], transcript: dict[str, Any]) -
         if span is None:
             print(f"  dropped invalid moment: {m.get('title', m)!r}")
             continue
+        span = snap_to_sentences(span[0], span[1], sentences, duration)
         # Reject moments that are mostly silence/music: the LLM only "saw"
         # the dialogue, so its description would not match the clip.
         spoken = [w for w in all_words if span[0] <= w["start"] and w["end"] <= span[1]]
@@ -441,9 +587,31 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -m src.highlights", description=__doc__.splitlines()[0])
     p.add_argument("-y", "--yes", action="store_true",
                    help="overwrite data/highlights.json (it may contain your manual edits)")
+    p.add_argument("--fix-boundaries", action="store_true",
+                   help="move existing moments to sentence boundaries (keeps your word edits; "
+                        "backs up highlights.json first)")
     args = p.parse_args(argv)
 
     out = config.HIGHLIGHTS_JSON
+    if args.fix_boundaries:
+        if not out.is_file():
+            print(f"{out} not found - run: python -m src.highlights")
+            return 1
+        data = json.loads(out.read_text(encoding="utf-8"))
+        backup = out.with_name(f"highlights.backup-{time.strftime('%Y%m%d-%H%M%S')}.json")
+        backup.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        transcript = load_transcript()
+        for line in fix_boundaries(data, transcript):
+            print(line)
+        problems = validate(data["moments"], float(transcript["duration"]))
+        out.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"Saved {out} (backup: {backup.name})")
+        if problems:
+            print("Validation problems:\n  " + "\n  ".join(problems))
+            return 2
+        print("Validation: OK")
+        return 0
+
     if out.exists() and not args.yes:
         print(f"{out} already exists and may contain your manual edits.\n"
               "Re-run with -y to overwrite it.")

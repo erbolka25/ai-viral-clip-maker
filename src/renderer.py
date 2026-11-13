@@ -91,7 +91,6 @@ def build_filter_graph(src: SourceInfo, plan: EditPlan, ass_name: str | None) ->
 
     # 0) Jump cuts (also used for a single range, to drop the pre-roll).
     v_head = f"[0:v]select='{_select_expr(plan, pre - half)}',setpts=N/FRAME_RATE/TB,"
-    a_head = f"[0:a]aselect='{_select_expr(plan, pre)}',asetpts=N/SR/TB,"
 
     # 1) Largest 9:16 window centered in the source (720p -> 405x720).
     crop_w = min(src.width, round(src.height * OUT_W / OUT_H))
@@ -132,9 +131,33 @@ def build_filter_graph(src: SourceInfo, plan: EditPlan, ass_name: str | None) ->
     chain.append("format=yuv420p")
     graph.append(current + ",".join(chain) + "[v]")
 
-    # Audio: same ranges, then loudness normalisation.
-    graph.append(f"{a_head}{LOUDNORM},aresample=48000[a]")
+    # Audio: same ranges (with crossfades), then loudness normalisation.
+    graph += _audio_graph(plan, pre)
     return ";".join(graph)
+
+
+def _audio_graph(plan: EditPlan, pre: float) -> list[str]:
+    """[0:a] -> [a]. Without crossfades: aselect on the kept ranges. With
+    crossfades: each range is cut with atrim, extended by d/2 on its inner
+    sides, and joined with acrossfade (duration d). Every join overlaps by
+    exactly d, so the total length equals the video's: sync is unchanged."""
+    d = config.AUDIO_CROSSFADE
+    n = len(plan.segments)
+    tail = f"{LOUDNORM},aresample=48000[a]"
+    if n == 1 or d <= 0:
+        return [f"[0:a]aselect='{_select_expr(plan, pre)}',asetpts=N/SR/TB,{tail}"]
+    h = d / 2
+    parts = ["[0:a]asplit=" + str(n) + "".join(f"[s{i}]" for i in range(n))]
+    for i, (a, b) in enumerate(plan.segments):
+        a2 = a - (h if i > 0 else 0.0) + pre
+        b2 = b + (h if i < n - 1 else 0.0) + pre
+        parts.append(f"[s{i}]atrim=start={a2:.5f}:end={b2:.5f},asetpts=PTS-STARTPTS[t{i}]")
+    prev = "[t0]"
+    for i in range(1, n):
+        parts.append(f"{prev}[t{i}]acrossfade=d={d:.3f}:c1=tri:c2=tri[x{i}]")
+        prev = f"[x{i}]"
+    parts.append(f"{prev}{tail}")
+    return parts
 
 
 def render_plan(

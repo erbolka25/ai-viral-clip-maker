@@ -6,7 +6,10 @@
 * Animated mode (config.EDIT_ANIMATED_SUBS): words appear as they are spoken
   and pop (quick scale up and back); the current word is yellow; text is
   UPPERCASE; 1-2 key words per line are coloured (names green, strong words red).
-  The line shows the words spoken so far, centered, and grows word by word.
+  Stable layout (config.SUB_STABLE_LAYOUT): the whole line is laid out from the
+  start with unspoken words invisible, so shown words never move; the pop is
+  vertical only (it does not change word widths). Otherwise the line shows
+  only the words spoken so far, centered, growing word by word.
 * Name capitalisation is fixed with glossary.txt (boobie -> Boobie).
 * Hook title box at the top (pops in, stays HOOK_DURATION s, fades out).
 * Progress bar that fills over the clip duration.
@@ -68,6 +71,8 @@ COMMON_WORDS = {
 
 # Pop animation for the word being spoken (ms).
 POP = r"\fscx72\fscy72\t(0,70,\fscx118\fscy118)\t(70,150,\fscx100\fscy100)"
+# Vertical-only pop + quick fade-in: word widths never change, so nothing shifts.
+POP_STABLE = r"\alpha&H70&\fscy55\t(0,60,\alpha&H00&\fscy125)\t(60,150,\fscy100)"
 
 
 def load_glossary_terms() -> list[str]:
@@ -189,6 +194,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 def _subtitle_events(words: list[dict[str, Any]], clip_len: float) -> list[str]:
     animated = config.EDIT_ANIMATED_SUBS
+    stable = animated and config.SUB_STABLE_LAYOUT
     events: list[str] = []
     groups = group_words(words)
     for gi, group in enumerate(groups):
@@ -210,12 +216,18 @@ def _subtitle_events(words: list[dict[str, Any]], clip_len: float) -> list[str]:
                 elif j < wi:     # already spoken: white or keyword colour
                     parts.append(f"{{\\c{colours[j] or WHITE}}}{x['word']}")
                 elif j == wi:    # being spoken: yellow + pop, then reset
-                    parts.append(f"{{\\c{YELLOW}{POP}}}{x['word']}{{\\r}}")
-                # Words not spoken yet are left out: the line stays centered
-                # and grows word by word.
+                    pop = POP_STABLE if stable else POP
+                    parts.append(f"{{\\c{YELLOW}{pop}}}{x['word']}{{\\r}}")
+                elif stable:     # not spoken yet: invisible but keeps its place
+                    parts.append(f"{{\\alpha&HFF&}}{x['word']}")
+                # (non-stable: unspoken words are left out; the line grows centered)
+            # Stable: bottom-anchored (an2), so the vertical pop grows upwards
+            # from the baseline and the line itself never moves.
+            anchor = (f"\\an2\\pos({PLAY_W // 2},{SUB_Y + SUB_SIZE // 2})" if stable
+                      else f"\\an5\\pos({PLAY_W // 2},{SUB_Y})")
             events.append(
                 f"Dialogue: 1,{_ass_time(start)},{_ass_time(end)},Sub,,0,0,0,,"
-                f"{{\\an5\\pos({PLAY_W // 2},{SUB_Y})}}{' '.join(parts)}"
+                f"{{{anchor}}}{' '.join(parts)}"
             )
     return events
 
