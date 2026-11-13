@@ -55,6 +55,9 @@ class Transcript:
     device: str
     compute_type: str
     segments: list[Segment]
+    glossary: list[str] = field(default_factory=list)
+    # Seconds added to every timestamp (non-zero when transcribing an excerpt).
+    time_offset: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -95,15 +98,37 @@ def load_wav(audio_path: Path) -> "np.ndarray":
     return np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
 
 
+def load_glossary(path: Path) -> list[str]:
+    """Read glossary terms: one per line, blank lines and '#' comments ignored."""
+    if not path.is_file():
+        raise FileNotFoundError(f"Glossary file not found: {path}")
+    terms: list[str] = []
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        term = line.split("#", 1)[0].strip()
+        if term and term not in terms:
+            terms.append(term)
+    return terms
+
+
 def transcribe(
     audio_path: Path,
     model_name: str = config.WHISPER_MODEL,
     language: str | None = None,
     progress: ProgressCallback | None = None,
+    glossary: list[str] | None = None,
+    time_offset: float = 0.0,
 ) -> Transcript:
     """Transcribe ``audio_path`` and return a :class:`Transcript`.
 
     ``language=None`` enables automatic language detection.
+
+    ``glossary`` terms are passed to Whisper as *hotwords*. faster-whisper
+    puts hotwords in front of EVERY 30-second decoding window, so the names
+    are "fresh" for the whole video. (``initial_prompt`` would only be seen
+    by the first window and then slide out of context.)
+
+    ``time_offset`` is added to all timestamps, so an excerpt cut from the
+    full audio reports times relative to the original video.
     """
     if not audio_path.is_file():
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
@@ -130,22 +155,25 @@ def transcribe(
         word_timestamps=True,       # useful later for word-by-word subtitles
         vad_filter=True,            # skip music / silence (common in GTA videos)
         vad_parameters={"min_silence_duration_ms": 500},
+        hotwords=", ".join(glossary) if glossary else None,
     )
 
     total = float(info.duration)
+    off = time_offset
     segments: list[Segment] = []
     # The iterator is lazy: transcription actually happens in this loop.
     for seg in segments_iter:
         segments.append(
             Segment(
                 id=len(segments),
-                start=round(seg.start, 3),
-                end=round(seg.end, 3),
+                start=round(seg.start + off, 3),
+                end=round(seg.end + off, 3),
                 text=seg.text.strip(),
                 avg_logprob=round(seg.avg_logprob, 4),
                 no_speech_prob=round(seg.no_speech_prob, 4),
                 words=[
-                    Word(round(w.start, 3), round(w.end, 3), w.word, round(w.probability, 4))
+                    Word(round(w.start + off, 3), round(w.end + off, 3), w.word,
+                         round(w.probability, 4))
                     for w in (seg.words or [])
                 ],
             )
@@ -163,6 +191,8 @@ def transcribe(
         device=device,
         compute_type=compute_type,
         segments=segments,
+        glossary=list(glossary or []),
+        time_offset=round(time_offset, 3),
     )
 
 
@@ -186,6 +216,7 @@ def save_transcript(transcript: Transcript, json_path: Path, txt_path: Path) -> 
         f"# Language: {transcript.language} "
         f"(confidence {transcript.language_probability:.0%})",
         f"# Model: {transcript.model} on {transcript.device} ({transcript.compute_type})",
+        f"# Glossary: {', '.join(transcript.glossary) or '(none)'}",
         f"# Segments: {len(transcript.segments)}",
         "",
     ]

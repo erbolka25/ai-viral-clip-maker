@@ -5,7 +5,8 @@ Run from the project root:
     python -m src.main             # asks before overwriting existing outputs
     python -m src.main --yes       # overwrite without asking
     python -m src.main --skip-existing   # reuse existing outputs
-    python -m src.main --model medium    # use a different Whisper model
+    python -m src.main --model small     # use a different Whisper model
+    python -m src.main --no-glossary     # disable glossary hotwords
 """
 
 from __future__ import annotations
@@ -122,7 +123,22 @@ def step_audio(policy: str) -> Path:
     return out
 
 
-def step_transcribe(policy: str, model: str, language: str | None) -> dict[str, Any]:
+def resolve_glossary(arg: str | None, disabled: bool) -> list[str]:
+    """Return glossary terms from --glossary, or glossary.txt if it exists."""
+    from src.transcriber import load_glossary
+
+    if disabled:
+        return []
+    if arg:  # explicit path: must exist
+        return load_glossary(Path(arg))
+    if config.GLOSSARY_TXT.is_file():
+        return load_glossary(config.GLOSSARY_TXT)
+    return []
+
+
+def step_transcribe(
+    policy: str, model: str, language: str | None, glossary: list[str]
+) -> dict[str, Any]:
     from src.transcriber import detect_device, save_transcript, transcribe
 
     console.rule("[bold]5. Speech recognition")
@@ -134,8 +150,9 @@ def step_transcribe(policy: str, model: str, language: str | None) -> dict[str, 
     device, compute = detect_device()
     console.print(
         f"  Model [bold]{model}[/] on [bold]{device}[/] ({compute}). "
-        "First run downloads the model (~500 MB for 'small')."
+        "First run downloads the model (small ~0.5 GB, medium ~1.5 GB)."
     )
+    console.print(f"  Glossary: {', '.join(glossary) if glossary else '(none)'}")
     t0 = time.perf_counter()
     with Progress(
         TextColumn("  Transcribing"),
@@ -152,7 +169,8 @@ def step_transcribe(policy: str, model: str, language: str | None) -> dict[str, 
             bar.update(task, completed=pct, pos=f"{done:.0f}s / {total:.0f}s audio")
 
         transcript = transcribe(
-            config.AUDIO_WAV, model_name=model, language=language, progress=on_progress
+            config.AUDIO_WAV, model_name=model, language=language,
+            progress=on_progress, glossary=glossary,
         )
     save_transcript(transcript, config.TRANSCRIPT_JSON, config.TRANSCRIPT_TXT)
     console.print(
@@ -202,9 +220,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     g.add_argument("-y", "--yes", action="store_true", help="overwrite existing outputs")
     g.add_argument("--skip-existing", action="store_true", help="reuse existing outputs")
     p.add_argument("--model", default=config.WHISPER_MODEL,
-                   help="Whisper model: tiny/base/small/medium/large-v3 (default: small)")
+                   help="Whisper model: tiny/base/small/medium/large-v3 "
+                        f"(default: {config.WHISPER_MODEL})")
     p.add_argument("--language", default=None,
                    help="force source language code (default: auto-detect)")
+    gl = p.add_mutually_exclusive_group()
+    gl.add_argument("--glossary", metavar="PATH", default=None,
+                    help="terms file, one per line (default: glossary.txt if it exists)")
+    gl.add_argument("--no-glossary", action="store_true", help="disable the glossary")
     return p.parse_args(argv)
 
 
@@ -218,7 +241,8 @@ def main(argv: list[str] | None = None) -> int:
         step_input()
         info = step_inspect(policy)
         step_audio(policy)
-        transcript = step_transcribe(policy, args.model, args.language)
+        glossary = resolve_glossary(args.glossary, args.no_glossary)
+        transcript = step_transcribe(policy, args.model, args.language, glossary)
         print_summary(info, transcript)
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user.[/]")

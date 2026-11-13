@@ -1,0 +1,3 @@
+# Names and terms Whisper should spell correctly. One per line; '#' = comment.
+Boobie
+Raymond

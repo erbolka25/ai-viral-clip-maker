@@ -22,12 +22,20 @@ AUDIO_WAV: Path = DATA_DIR / "audio.wav"
 TRANSCRIPT_JSON: Path = DATA_DIR / "transcript.json"
 TRANSCRIPT_TXT: Path = DATA_DIR / "transcript.txt"
 
+# Names / slang Whisper should spell correctly (one term per line).
+GLOSSARY_TXT: Path = PROJECT_ROOT / "glossary.txt"
+
+# Scratch area for model comparisons / experiments.
+TEST_DIR: Path = DATA_DIR / "test"
+
 # Audio extraction settings (what Whisper expects natively)
 AUDIO_SAMPLE_RATE: int = 16_000
 AUDIO_CHANNELS: int = 1
 
 # Whisper settings
-WHISPER_MODEL: str = "small"
+# "medium" spells names/slang far better than "small" (see data/test/
+# comparison_*.md) at roughly 3-5x the CPU time.
+WHISPER_MODEL: str = "medium"
 WHISPER_CPU_COMPUTE_TYPE: str = "int8"
 WHISPER_GPU_COMPUTE_TYPE: str = "float16"
 
