@@ -3,7 +3,24 @@
 Turns a long GTA 6 video (used with the creator's permission) into short, fast-paced,
 vertical 9:16 clips (20–60 s) with English subtitles for YouTube Shorts, TikTok and Reels.
 
-**Status: Phase 1 — video processing** (inspect → extract audio → transcribe).
+**Pipeline:** inspect → extract audio → transcribe → LLM picks highlights → render vertical
+clips with word-by-word subtitles and a hook title.
+
+## Quick start (full pipeline)
+
+```powershell
+.venv\Scripts\Activate.ps1
+python -m src.main              # 1. video info, audio, transcript (~30 min on CPU with medium)
+python -m src.highlights        # 2. LLM picks 10-15 moments -> data\highlights.json
+python -m src.render            # 3. top 10 clips -> output\gta6_clip_01.mp4 ... _10.mp4
+```
+
+### Fix a clip and re-render it
+
+1. Open `output\clips_summary.md` to find the clip number.
+2. Edit `data\highlights.json`: fix words in the moment's `"words"` list (the subtitle
+   text), or change `hook_title`, `start` or `end`.
+3. `python -m src.render --clip 3`
 
 ## Project structure
 
@@ -11,7 +28,7 @@ vertical 9:16 clips (20–60 s) with English subtitles for YouTube Shorts, TikTo
 gta6-clip-maker/
   input/            gta6.mp4  (source video — never modified)
   data/             video_info.json, audio.wav, transcript.json, transcript.txt
-  output/           final clips (later phases)
+  output/           gta6_clip_NN.mp4, clips_summary.md, clips_manifest.json
   src/
     config.py           paths & settings
     deps.py             FFmpeg / package discovery
@@ -19,7 +36,12 @@ gta6-clip-maker/
     audio_extractor.py  16 kHz mono WAV extraction
     transcriber.py      Faster-Whisper transcription (original language)
     compare_models.py   model / glossary comparison on short excerpts
-    main.py             CLI pipeline
+    main.py             Phase 1 CLI pipeline
+    llm.py              provider-neutral LLM call (Groq / Anthropic)
+    highlights.py       LLM highlight detection -> data/highlights.json
+    subtitles.py        .ass subtitles (word highlight, hook title)
+    renderer.py         FFmpeg 9:16 render of one clip
+    render.py           batch / single-clip render CLI
   glossary.txt          names Whisper should spell correctly
   requirements.txt
 ```
@@ -107,6 +129,43 @@ python -m src.llm      # asks the model for {"ok": true}; prints model, time, to
 ```
 
 The Groq free tier allows about 8K tokens per minute for `gpt-oss-120b`, input and output combined.
+
+## Highlights (Phase 2)
+
+`python -m src.highlights` sends a compact transcript to the LLM and saves 10-15 moments
+to `data/highlights.json`. For each moment: `id, start, end, title, category, score,
+reason, hook_title` and `words`, the exact words with timestamps copied from
+`data/transcript.json` in code. The subtitles are built **only** from `words`, so
+editing them fixes typos in the clip.
+
+- Lines are re-split from word timestamps, because some Whisper segments include long music gaps.
+- Code snaps moments to word boundaries, forces 20-60 s, drops mostly-silent
+  moments and removes overlaps (> 5 s, the lower score loses).
+- If the transcript is too big for one request, it is split into overlapping chunks.
+- The command refuses to overwrite an existing `highlights.json` (your edits) unless you pass `-y`.
+
+## Rendering (Phase 3)
+
+| Command | Effect |
+|---|---|
+| `python -m src.render` | Top 10 by score → `output/gta6_clip_01..10.mp4` + `clips_summary.md` (asks before overwriting) |
+| `python -m src.render -y` | Same, overwrite without asking |
+| `python -m src.render --top 5` | Only the top 5 |
+| `python -m src.render --clip N` | Re-render clip N from the current `highlights.json` |
+| `python -m src.render --test` | Top moment → `data/test/test_clip.mp4` + 3 PNG frames |
+
+Clip numbers are fixed at batch time (`output/clips_manifest.json`), so changing scores
+later does not renumber clips.
+
+Look: center crop to 1080x1920, slow zoom 1.00 → 1.08, source frame rate (23.976),
+contrast 1.05 / saturation 1.1, loudness normalised to -14 LUFS, H.264 + AAC.
+Subtitles: Arial Black, 2-4 words per line, current word in yellow, at ~67% height.
+Names from `glossary.txt` are capitalised (boobie → Boobie). The hook title shows in a dark
+bar at the top for the first 3 seconds.
+
+**Source subtitles:** the source video has burned-in Russian subtitles at the bottom. That
+band is blurred and darkened in every clip (`SOURCE_SUBTITLE_BAND` in `src/renderer.py`;
+set it to `None` for a clean source).
 
 ## Outputs
 
