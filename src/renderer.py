@@ -16,7 +16,6 @@ Pipeline (one FFmpeg call, the source video is only read):
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -38,7 +37,6 @@ SOURCE_SUBTITLE_BAND: tuple[float, float] | None = (0.70, 0.945)
 BAND_BLUR_SIGMA = 28
 BAND_DARKEN = -0.18  # eq brightness offset inside the band
 BAND_FEATHER = 18    # source pixels of soft edge at the band's top/bottom
-FONTS_DIR = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
 
 
 class RenderError(RuntimeError):
@@ -106,8 +104,9 @@ def build_video_filter(src: SourceInfo, duration: float, ass_name: str | None) -
     if ass_name:
         # Relative file name: FFmpeg runs with cwd = the .ass folder, which
         # avoids Windows drive-letter escaping problems in filter arguments.
-        fonts = FONTS_DIR.as_posix().replace(":", "\\:")
-        chain.append(f"ass={ass_name}:fontsdir='{fonts}'")
+        # Fonts are found by name through the system font provider
+        # (DirectWrite on Windows), so no fontsdir is needed.
+        chain.append(f"ass={ass_name}")
     chain.append("format=yuv420p")
     graph.append(current + ",".join(chain) + "[v]")
     return ";".join(graph)
