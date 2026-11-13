@@ -64,7 +64,7 @@ flowchart LR
 
 | Area | Tools |
 |---|---|
-| Language | Python 3.10–3.13 |
+| Language | Python 3.13 (tested) |
 | Speech-to-text | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2) |
 | LLM | Groq API (`gpt-oss-120b`) or Anthropic API, with strict JSON output |
 | Video / audio | FFmpeg + FFprobe (filter graphs, `loudnorm`, `acrossfade`, libx264 / AAC) |
@@ -157,7 +157,7 @@ Everything else is in [`src/config.py`](src/config.py):
 | Setting | Default | Purpose |
 |---|---|---|
 | `WHISPER_MODEL` | `medium` | Whisper model size |
-| `LLM_MODELS` | `gpt-oss-120b` / `claude-opus-5-5` | Model per provider |
+| `LLM_MODELS` | `gpt-oss-120b` / `claude-sonnet-5-5` | Model per provider |
 | `GROQ_REASONING_EFFORT` | `medium` | Reasoning effort for gpt-oss |
 | `MOMENT_MIN_SECONDS` / `MAX` | `20` / `60` | Clip length before cuts |
 | `RENDER_VERSION` | `v3` | Output subfolder, so earlier versions are kept |

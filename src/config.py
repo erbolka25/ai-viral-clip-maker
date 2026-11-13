@@ -57,10 +57,10 @@ LLM_DEFAULT_PROVIDER: str = "groq"
 #  groq: gpt-oss-120b - Groq's strongest production model: 131K context,
 #        strict JSON-schema output, reasoning model. (Llama 3.x models on Groq
 #        were shut down for free/dev tiers on 2026-08-16.)
-#  anthropic: Claude Opus 5.5 - not used yet.
+#  anthropic: Claude Sonnet 5.5 - fast and cost-efficient for this task.
 LLM_MODELS: dict[str, str] = {
     "groq": "openai/gpt-oss-120b",
-    "anthropic": "claude-opus-5-5",
+    "anthropic": "claude-sonnet-5-5",
 }
 
 # Environment variable holding each provider's API key.
