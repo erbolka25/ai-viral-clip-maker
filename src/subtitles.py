@@ -22,7 +22,7 @@ SUB_Y = round(PLAY_H * 0.675)        # line centre: 67.5% of the height
 SUB_FONT = "Arial Black"
 SUB_SIZE = 100
 HOOK_FONT = "Arial Black"
-HOOK_SIZE = 74
+HOOK_SIZE = 88
 HOOK_Y = 210                          # box centre from the top
 HOOK_SECONDS = 3.0
 
