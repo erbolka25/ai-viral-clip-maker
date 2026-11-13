@@ -1,6 +1,7 @@
 # Phase 1 - video processing
 # External (not pip): FFmpeg + FFprobe  ->  winget install Gyan.FFmpeg
 faster-whisper>=1.1
+numpy>=1.26          # audio analysis for smart jump cuts (also pulled in by faster-whisper)
 rich>=13
 
 # Phase 2 - LLM
