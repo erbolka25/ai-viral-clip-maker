@@ -1,14 +1,16 @@
 """Render vertical clips from data/highlights.json.
 
-    python -m src.render                 # top 10 moments -> output/gta6_clip_01.mp4 ... _10.mp4
+    python -m src.render                 # top 10 moments -> output/<version>/gta6_clip_01..10.mp4
     python -m src.render --top 5         # top 5 instead
     python -m src.render --clip 3        # re-render clip 3 after editing highlights.json
     python -m src.render --test          # top moment -> data/test/test_clip.mp4 (+ frames)
     python -m src.render -y              # batch: overwrite existing clips without asking
 
-Clip numbers are fixed when the batch is rendered (output/clips_manifest.json
+<version> is config.RENDER_VERSION (e.g. v2); older versions stay in their own
+folders. Clip numbers are fixed when a batch is rendered (clips_manifest.json
 maps clip number -> moment id), so editing scores later does not renumber
 clips. --clip N always uses the CURRENT text/times in highlights.json.
+Editing effects are switched on/off in src/config.py (EDIT_* settings).
 """
 
 from __future__ import annotations
@@ -21,12 +23,14 @@ from pathlib import Path
 from typing import Any
 
 from src import config
-from src.renderer import RenderError, extract_frames, probe, render_clip
+from src.editing import EditPlan, build_plan, describe
+from src.renderer import RenderError, extract_frames, render_plan, source_info, stream_durations
 from src.subtitles import write_ass
 
-SUBS_DIR = config.DATA_DIR / "subs"
-MANIFEST = config.OUTPUT_DIR / "clips_manifest.json"
-SUMMARY = config.OUTPUT_DIR / "clips_summary.md"
+OUT_DIR = config.OUTPUT_DIR / config.RENDER_VERSION
+SUBS_DIR = config.DATA_DIR / "subs" / config.RENDER_VERSION
+MANIFEST = OUT_DIR / "clips_manifest.json"
+SUMMARY = OUT_DIR / "clips_summary.md"
 CLIP_NAME = "gta6_clip_{:02d}.mp4"
 
 
@@ -37,10 +41,13 @@ def load_moments() -> list[dict[str, Any]]:
     return data["moments"]
 
 
-def render_moment(moment: dict[str, Any], out_path: Path, hook: bool = True) -> Path:
-    """Write the moment's .ass file and render the finished clip."""
-    ass = write_ass(moment, SUBS_DIR / f"{out_path.stem}.ass", hook=hook)
-    return render_clip(float(moment["start"]), float(moment["end"]), out_path, ass_path=ass)
+def render_moment(moment: dict[str, Any], out_path: Path, hook: bool = True) -> EditPlan:
+    """Plan the edit, write the .ass overlay and render the finished clip."""
+    src = source_info()
+    plan = build_plan(moment, src.fps, src.duration)
+    ass = write_ass(moment, plan, SUBS_DIR / f"{out_path.stem}.ass", hook=hook)
+    render_plan(plan, out_path, ass_path=ass)
+    return plan
 
 
 def mmss(t: float) -> str:
@@ -48,25 +55,28 @@ def mmss(t: float) -> str:
 
 
 def write_summary(manifest: list[dict[str, Any]], moments: list[dict[str, Any]]) -> Path:
-    """output/clips_summary.md from the manifest + current highlights.json."""
+    """clips_summary.md from the manifest + current highlights.json."""
     by_id = {m["id"]: m for m in moments}
     lines = [
-        "# GTA 6 clips", "",
-        "| # | File | Hook title | Title | Category | Score | Start - End | Length |",
-        "|---|---|---|---|---|---|---|---|",
+        f"# GTA 6 clips ({config.RENDER_VERSION})", "",
+        "| # | File | Hook title | Title | Category | Score | Source start - end | Source length | Clip length |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
-    for entry in manifest:
-        m = by_id.get(entry["moment_id"])
+    for e in manifest:
+        m = by_id.get(e["moment_id"])
+        exists = (OUT_DIR / e["file"]).is_file()
+        name = e["file"] if exists else f"{e['file']} (not rendered)"
         if not m:
-            lines.append(f"| {entry['clip']} | {entry['file']} | (moment {entry['moment_id']} "
-                         "missing from highlights.json) | | | | | |")
+            lines.append(f"| {e['clip']} | {name} | (moment {e['moment_id']} missing) | | | | | | |")
             continue
+        clip_len = f"{e['clip_seconds']:.1f}s" if exists and e.get("clip_seconds") else "-"
         lines.append(
-            f"| {entry['clip']} | {entry['file']} | {m['hook_title']} | {m['title']} | "
-            f"{m['category']} | {m['score']} | {mmss(m['start'])} - {mmss(m['end'])} | "
-            f"{m['end'] - m['start']:.1f}s |"
+            f"| {e['clip']} | {name} | {m['hook_title']} | {m['title']} | {m['category']} | "
+            f"{m['score']} | {mmss(m['start'])} - {mmss(m['end'])} | "
+            f"{m['end'] - m['start']:.1f}s | {clip_len} |"
         )
-    lines += ["", "Re-render one clip after editing data/highlights.json: "
+    lines += ["", "Clip length is after jump cuts and the clean ending.", "",
+              "Re-render one clip after editing data/highlights.json: "
               "`python -m src.render --clip N`", ""]
     SUMMARY.write_text("\n".join(lines), encoding="utf-8")
     return SUMMARY
@@ -79,39 +89,56 @@ def confirm(question: str) -> bool:
         return False
 
 
+def _render_entry(entry: dict[str, Any], moment: dict[str, Any]) -> None:
+    out = OUT_DIR / entry["file"]
+    t0 = time.perf_counter()
+    plan = render_moment(moment, out)
+    entry["source_seconds"] = round(float(moment["end"]) - float(moment["start"]), 2)
+    entry["clip_seconds"] = round(plan.duration, 2)
+    entry["render_seconds"] = round(time.perf_counter() - t0, 1)
+    print(f"clip {entry['clip']:>2}: moment #{moment['id']} {moment['hook_title']!r}  "
+          f"{entry['source_seconds']:.1f}s -> {entry['clip_seconds']:.1f}s  "
+          f"({entry['render_seconds']:.0f}s)  [{describe(plan)}]")
+
+
 def render_batch(top: int, overwrite: bool) -> int:
     moments = load_moments()
     chosen = sorted(moments, key=lambda m: (-m["score"], m["start"]))[:top]
-    existing = [config.OUTPUT_DIR / CLIP_NAME.format(i) for i in range(1, len(chosen) + 1)]
-    existing = [p for p in existing if p.exists()]
+    existing = [p for i in range(1, len(chosen) + 1) if (p := OUT_DIR / CLIP_NAME.format(i)).exists()]
     if existing and not overwrite and not confirm(
-            f"{len(existing)} clip file(s) already exist in output/. Overwrite them?"):
+            f"{len(existing)} clip file(s) already exist in {OUT_DIR}. Overwrite them?"):
         print("Nothing rendered. Use -y to overwrite, or --clip N for a single clip.")
         return 1
 
-    manifest: list[dict[str, Any]] = []
+    manifest = [{"clip": n, "file": CLIP_NAME.format(n), "moment_id": m["id"]}
+                for n, m in enumerate(chosen, 1)]
     t_all = time.perf_counter()
-    for n, m in enumerate(chosen, 1):
-        out = config.OUTPUT_DIR / CLIP_NAME.format(n)
-        t0 = time.perf_counter()
-        print(f"[{n}/{len(chosen)}] moment #{m['id']} score {m['score']} "
-              f"{m['hook_title']!r} ({m['end'] - m['start']:.0f}s)...", end=" ", flush=True)
-        render_moment(m, out)
-        print(f"{time.perf_counter() - t0:.0f}s")
-        manifest.append({"clip": n, "file": out.name, "moment_id": m["id"]})
-
-    MANIFEST.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    for entry, m in zip(manifest, chosen):
+        _render_entry(entry, m)
+        MANIFEST.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     write_summary(manifest, moments)
-    print(f"\n{len(chosen)} clips in {config.OUTPUT_DIR} ({time.perf_counter() - t_all:.0f}s)")
+    print(f"\n{len(chosen)} clips in {OUT_DIR} ({time.perf_counter() - t_all:.0f}s)")
     print(f"Summary: {SUMMARY}")
     return 0
 
 
+def _load_manifest() -> list[dict[str, Any]] | None:
+    """This version's manifest, else the newest other version's (same clip numbers)."""
+    if MANIFEST.is_file():
+        return json.loads(MANIFEST.read_text(encoding="utf-8"))
+    others = sorted(config.OUTPUT_DIR.glob("*/clips_manifest.json"), reverse=True)
+    if others:
+        print(f"Using clip numbers from {others[0].parent.name}/clips_manifest.json")
+        return [{k: e[k] for k in ("clip", "file", "moment_id")}
+                for e in json.loads(others[0].read_text(encoding="utf-8"))]
+    return None
+
+
 def render_single(clip: int) -> int:
-    if not MANIFEST.is_file():
+    manifest = _load_manifest()
+    if manifest is None:
         print("No clips_manifest.json yet - run the batch first: python -m src.render")
         return 1
-    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     entry = next((e for e in manifest if e["clip"] == clip), None)
     if entry is None:
         print(f"Clip {clip} not found; valid: {', '.join(str(e['clip']) for e in manifest)}")
@@ -121,12 +148,10 @@ def render_single(clip: int) -> int:
     if moment is None:
         print(f"Moment id {entry['moment_id']} (clip {clip}) is no longer in highlights.json.")
         return 1
-    out = config.OUTPUT_DIR / entry["file"]
-    t0 = time.perf_counter()
-    render_moment(moment, out)
+    _render_entry(entry, moment)
+    MANIFEST.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     write_summary(manifest, moments)
-    print(f"Clip {clip} (moment #{moment['id']}, {moment['hook_title']!r}) -> {out} "
-          f"({time.perf_counter() - t0:.0f}s)")
+    print(f"-> {OUT_DIR / entry['file']}")
     return 0
 
 
@@ -134,10 +159,11 @@ def render_test(hook: bool) -> int:
     best = max(load_moments(), key=lambda m: m["score"])
     out = config.TEST_DIR / "test_clip.mp4"
     t0 = time.perf_counter()
-    render_moment(best, out, hook=hook)
-    print(f"#{best['id']} {best['title']!r} -> {out} ({time.perf_counter() - t0:.1f}s)")
-    d = probe(out)["duration_seconds"]
-    for f in extract_frames(out, [1.0, d / 2, d - 1.5], config.TEST_DIR / "frames", "test"):
+    plan = render_moment(best, out, hook=hook)
+    print(f"#{best['id']} {best['title']!r} -> {out} ({time.perf_counter() - t0:.1f}s) [{describe(plan)}]")
+    print("streams:", stream_durations(out))
+    d = plan.duration
+    for f in extract_frames(out, [1.0, d / 2, d - 1.0], config.TEST_DIR / "frames", "test"):
         print("frame:", f)
     return 0
 
@@ -155,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     config.ensure_dirs()
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
     try:
         if args.test:
             return render_test(hook=not args.no_hook)
@@ -167,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("\nInterrupted.")
         return 130
+
 
 
 if __name__ == "__main__":

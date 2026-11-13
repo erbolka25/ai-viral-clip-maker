@@ -77,6 +77,53 @@ LLM_MAX_OUTPUT_TOKENS: dict[str, int] = {
 GROQ_REASONING_EFFORT: str = "medium"
 
 
+# --- Rendering / retention editing (Phase 3) ---------------------------------
+# Clips are written to output/<RENDER_VERSION>/ so older versions are kept.
+RENDER_VERSION: str = "v2"
+
+# 1. Jump cuts: remove silences longer than JUMP_CUT_MIN_SILENCE between words,
+#    keeping JUMP_CUT_PAD seconds around the words. Subtitles follow the cuts.
+EDIT_JUMP_CUTS: bool = True
+JUMP_CUT_MIN_SILENCE: float = 0.5
+JUMP_CUT_PAD: float = 0.15
+
+# 2a. Punch-in zooms: framing alternates between these zoom levels every
+#     PUNCH_ZOOM_INTERVAL seconds with a quick smooth transition. A level change
+#     that falls near a jump cut happens instantly ON the cut (hides the cut).
+#     When off, a slow linear zoom 1.0 -> SLOW_ZOOM_END is used instead.
+EDIT_PUNCH_ZOOMS: bool = True
+PUNCH_ZOOM_LEVELS: tuple[float, ...] = (1.0, 1.12, 1.05)
+PUNCH_ZOOM_INTERVAL: float = 3.5
+PUNCH_ZOOM_TRANSITION: float = 0.25
+SLOW_ZOOM_END: float = 1.08
+
+# 2b. Short extra punch-in on the loudest audio peaks.
+EDIT_PEAK_PUNCH: bool = True
+PEAK_PUNCH_AMOUNT: float = 0.08     # added to the current zoom level
+PEAK_PUNCH_DURATION: float = 0.3
+PEAK_PUNCH_MAX: int = 3             # per clip
+PEAK_PUNCH_MIN_GAP: float = 4.0     # seconds between peak punches
+
+# 3. Animated subtitles: words pop in as they are spoken, UPPERCASE, current
+#    word yellow, 1-2 key words per line coloured (names green, strong words red).
+EDIT_ANIMATED_SUBS: bool = True
+SUB_UPPERCASE: bool = True
+SUB_KEYWORD_COLORS: bool = True
+
+# 4. Hook title pops in, stays HOOK_DURATION seconds, fades out.
+EDIT_HOOK_ANIMATION: bool = True
+HOOK_DURATION: float = 2.5
+
+# 5. Thin progress bar that fills over the clip ("top" or "bottom").
+EDIT_PROGRESS_BAR: bool = True
+PROGRESS_BAR_POSITION: str = "top"
+PROGRESS_BAR_HEIGHT: int = 12
+
+# 6. Clean ending: cut the clip END_PAD seconds after the last spoken word.
+EDIT_CLEAN_ENDING: bool = True
+END_PAD: float = 0.3
+
+
 def ensure_dirs() -> None:
     """Create the working directories if they do not exist yet."""
     for directory in (INPUT_DIR, OUTPUT_DIR, DATA_DIR):
