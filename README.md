@@ -183,12 +183,13 @@ Every effect can be switched on and off in `src/config.py`:
 |---|---|
 | `EDIT_JUMP_CUTS` | Removes silences longer than 0.5 s between words, keeping 0.15 s around words. Subtitles follow the cuts. |
 | `JUMP_CUT_SMART` | v3: only removes the parts of a gap whose audio is quiet (below `JUMP_CUT_QUIET_DB`, default -42 dBFS). Loud gaps such as driving, shooting or music are kept. Bursts shorter than `JUMP_CUT_IGNORE_BURST` (0.3 s), like footsteps, don't count as action. |
+| `JUMP_CUT_MIN_PIECE` | Never leaves a kept piece shorter than 1.2 s. A cut that would create one is skipped. |
 | `AUDIO_CROSSFADE` | v3: 40 ms audio crossfade at every cut (0 = hard cut). Length and sync are unchanged. |
 | `SUB_STABLE_LAYOUT` | v3: the full subtitle line is laid out from the start, unspoken words are invisible, and the pop is vertical only, so shown words never move. |
 | `EDIT_PUNCH_ZOOMS` | Framing alternates 1.00 → 1.12 → 1.05 every 3.5 s. A change near a jump cut happens instantly on the cut. Off = slow 1.00 → 1.08 zoom. |
 | `EDIT_PEAK_PUNCH` | Short (0.3 s) extra punch-in on the 3 loudest moments. |
 | `EDIT_ANIMATED_SUBS` | Words pop in as they are spoken, UPPERCASE, current word yellow; names green and strong words red (max 2 per line). |
-| `EDIT_HOOK_ANIMATION` | The hook title pops in, stays 2.5 s, then fades out. |
+| `EDIT_HOOK_ANIMATION` | The hook title pops in, stays 2.5 s, then fades out. It always stays on one line: a long hook gets a smaller font, measured with the system font engine. |
 | `EDIT_PROGRESS_BAR` | Thin yellow bar at the top that fills over the clip. |
 | `EDIT_CLEAN_ENDING` | The clip ends 0.3 s after the last word. |
 

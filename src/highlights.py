@@ -34,6 +34,7 @@ CATEGORIES = ("funny", "surprising", "exciting", "interesting_facts", "strong_re
 MIN_LEN, MAX_LEN = 20.0, 60.0
 TARGET_MIN, TARGET_MAX = 10, 15
 MAX_OVERLAP = 5.0  # seconds two moments may share before the weaker one is dropped
+HOOK_MAX_WORDS = 4  # hook titles: 3-4 short words (the renderer also shrinks long ones)
 PAD_BEFORE, PAD_AFTER = 0.3, 0.5  # breathing room around the first/last word
 LINE_SPLIT_GAP = 1.5      # new transcript line after this much silence
 MIN_WORDS_PER_SEC = 0.5   # below this a moment is mostly silence -> rejected
@@ -66,8 +67,8 @@ line, just after the payoff. Never cut a sentence in half.
 - score: integer 1-10 (10 = will definitely go viral).
 - title: short descriptive English title.
 - reason: one sentence on why it works as a short.
-- hook_title: catchy English text shown in the first 3 seconds, MAX 5 WORDS, \
-no hashtags, no emojis.
+- hook_title: catchy English text shown in the first 3 seconds: 3-4 SHORT words \
+(max 4 words, about 20 characters, it must fit on one line), no hashtags, no emojis.
 {extra}
 Return ONLY a JSON object in exactly this shape:
 {{"moments": [{{"id": 1, "start": 0, "end": 30, "title": "...", "category": "funny", \
@@ -472,7 +473,7 @@ def postprocess(raw_moments: list[dict[str, Any]], transcript: dict[str, Any]) -
             "category": category,
             "score": max(1, min(10, score)),
             "reason": clean_text(m.get("reason")),
-            "hook_title": clean_text(m.get("hook_title"), max_words=5),
+            "hook_title": clean_text(m.get("hook_title"), max_words=HOOK_MAX_WORDS),
         })
 
     # De-duplicate / remove big overlaps: keep the higher score.
@@ -510,8 +511,8 @@ def validate(moments: list[dict[str, Any]], duration: float) -> list[str]:
             problems.append(f"#{m['id']}: duration {d:.1f}s not in 20-60s")
         if m["category"] not in CATEGORIES:
             problems.append(f"#{m['id']}: bad category {m['category']}")
-        if len(m["hook_title"].split()) > 5 or not m["hook_title"]:
-            problems.append(f"#{m['id']}: hook_title must be 1-5 words")
+        if len(m["hook_title"].split()) > HOOK_MAX_WORDS or not m["hook_title"]:
+            problems.append(f"#{m['id']}: hook_title must be 1-{HOOK_MAX_WORDS} words")
         if not m["words"]:
             problems.append(f"#{m['id']}: no words")
     ordered = sorted(moments, key=lambda m: m["start"])

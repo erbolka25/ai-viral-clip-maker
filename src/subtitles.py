@@ -32,6 +32,10 @@ HOOK_FONT = "Arial Black"
 HOOK_SIZE = 88
 HOOK_Y = 210                          # box top from the top edge
 HOOK_SECONDS_STATIC = 3.0             # when the hook animation is off
+# Hook text must fit on one line: 1080 - 2x70 margins - 2x22 box padding,
+# minus a little safety. Long hooks get a smaller font (never below the minimum).
+HOOK_MAX_WIDTH = 880
+HOOK_MIN_SIZE = 44
 
 MAX_WORDS, MIN_WORDS = 4, 2
 MAX_CHARS = 18          # keep a line on one row at this font size
@@ -232,6 +236,45 @@ def _subtitle_events(words: list[dict[str, Any]], clip_len: float) -> list[str]:
     return events
 
 
+def text_width(text: str, size: int, font: str) -> int:
+    """Rendered width in pixels of ``text`` (bold) at ASS font size ``size``.
+
+    On Windows this asks the system font engine (GDI), which matches what
+    libass draws (checked: 'DEADLY JUMP' @88 -> 502 px measured, ~500 px in
+    the video). Elsewhere a conservative estimate is used.
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        gdi, user = ctypes.windll.gdi32, ctypes.windll.user32
+        hdc = user.GetDC(0)
+        # Positive height = cell height, the same convention libass uses.
+        hfont = gdi.CreateFontW(size, 0, 0, 0, 900, 0, 0, 0, 1, 0, 0, 4, 0, font)
+        old = gdi.SelectObject(hdc, hfont)
+        extent = wintypes.SIZE()
+        gdi.GetTextExtentPoint32W(hdc, text, len(text), ctypes.byref(extent))
+        gdi.SelectObject(hdc, old)
+        gdi.DeleteObject(hfont)
+        user.ReleaseDC(0, hdc)
+        if extent.cx > 0:
+            return int(extent.cx)
+    except (AttributeError, OSError):
+        pass
+    return int(len(text) * size * 0.75)   # Arial Black caps average ~0.7 em
+
+
+def hook_font_size(text: str) -> int:
+    """Largest size <= HOOK_SIZE at which the hook fits on ONE line."""
+    width = text_width(text, HOOK_SIZE, HOOK_FONT)
+    if width <= HOOK_MAX_WIDTH:
+        return HOOK_SIZE
+    size = int(HOOK_SIZE * HOOK_MAX_WIDTH / width)
+    while size > HOOK_MIN_SIZE and text_width(text, size, HOOK_FONT) > HOOK_MAX_WIDTH:
+        size -= 1
+    return max(size, HOOK_MIN_SIZE)
+
+
 def _hook_event(hook_title: str, clip_len: float) -> str | None:
     text = re.sub(r"\s+", " ", _escape(hook_title)).strip().upper()  # ALL CAPS by design
     if not text:
@@ -242,8 +285,10 @@ def _hook_event(hook_title: str, clip_len: float) -> str | None:
     else:
         dur = min(HOOK_SECONDS_STATIC, clip_len)
         anim = r"\fad(120,200)"
+    # \q2 = never wrap; the font size is reduced so the line fits instead.
+    size = hook_font_size(text)
     return (f"Dialogue: 2,{_ass_time(0)},{_ass_time(dur)},Hook,,0,0,0,,"
-            f"{{\\an8\\pos({PLAY_W // 2},{HOOK_Y}){anim}}}{text}")
+            f"{{\\an8\\pos({PLAY_W // 2},{HOOK_Y})\\q2\\fs{size}{anim}}}{text}")
 
 
 def _progress_bar_events(clip_len: float) -> list[str]:

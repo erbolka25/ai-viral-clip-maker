@@ -110,6 +110,8 @@ JUMP_CUT_QUIET_DB: float = -42.0
 JUMP_CUT_WINDOW: float = 0.05
 # Loud bursts shorter than this (footsteps, clicks) do not count as action.
 JUMP_CUT_IGNORE_BURST: float = 0.3
+# Never leave a kept piece shorter than this (s); a cut that would is skipped.
+JUMP_CUT_MIN_PIECE: float = 1.2
 
 # Audio crossfade at every cut (seconds, 0 = hard cut). Total audio length is
 # unchanged, so audio and video stay in sync.

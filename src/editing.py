@@ -105,9 +105,27 @@ def keep_ranges(moment: dict[str, Any], video_duration: float) -> list[tuple[flo
         else:
             cuts.append((g0, g1))
 
-    keep: list[tuple[float, float]] = []
+    # Never leave a kept piece shorter than JUMP_CUT_MIN_PIECE: a cut that
+    # would create one is skipped (its gap stays in the clip). A cut at the
+    # very start only trims the beginning and creates no piece before it.
+    min_piece = config.JUMP_CUT_MIN_PIECE
+    accepted: list[tuple[float, float]] = []
     cur = start
     for c0, c1 in sorted(cuts):
+        trims_start = not accepted and c0 <= start + 1e-6
+        if trims_start or c0 - cur >= min_piece:
+            accepted.append((c0, c1))
+            cur = c1
+    # The last piece (after the final cut) must be long enough too. Dropping
+    # that cut merges it into the previous piece, which already met the minimum.
+    if accepted and end - accepted[-1][1] < min_piece:
+        only_start_trim = len(accepted) == 1 and accepted[0][0] <= start + 1e-6
+        if not only_start_trim:
+            accepted.pop()
+
+    keep: list[tuple[float, float]] = []
+    cur = start
+    for c0, c1 in accepted:
         if c0 > cur:
             keep.append((cur, c0))
         cur = max(cur, c1)
