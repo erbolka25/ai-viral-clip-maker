@@ -143,18 +143,24 @@ editing them fixes typos in the clip.
   moments and removes overlaps (> 5 s, the lower score loses).
 - If the transcript is too big for one request, it is split into overlapping chunks.
 - The command refuses to overwrite an existing `highlights.json` (your edits) unless you pass `-y`.
+- **Sentence boundaries:** moments start at a sentence start and end at a sentence end,
+  staying 20-60 s long before jump cuts. New runs do this automatically. For an existing file, run
+  `python -m src.highlights --fix-boundaries`. It keeps your edited words, adds transcript
+  words for any extended part, and saves a backup `data/highlights.backup-<time>.json` first.
+  A sentence ends at `. ! ?`, or at a segment end or pause that comes after a word able to end a
+  sentence (not "to", "the", "and"...), when the next word is capitalised.
 
 ## Rendering (Phase 3)
 
 | Command | Effect |
 |---|---|
-| `python -m src.render` | Top 10 by score → `output/v2/gta6_clip_01..10.mp4` + `clips_summary.md` (asks before overwriting) |
+| `python -m src.render` | Top 10 by score → `output/v3/gta6_clip_01..10.mp4` + `clips_summary.md` (asks before overwriting) |
 | `python -m src.render -y` | Same, overwrite without asking |
 | `python -m src.render --top 5` | Only the top 5 |
 | `python -m src.render --clip N` | Re-render clip N from the current `highlights.json` |
 | `python -m src.render --test` | Top moment → `data/test/test_clip.mp4` + 3 PNG frames |
 
-Clips go to `output/<RENDER_VERSION>/` (now `v2`; the first version is kept in `output/v1/`).
+Clips go to `output/<RENDER_VERSION>/` (now `v3`; earlier versions stay in `output/v1/` and `output/v2/`).
 Clip numbers are fixed at batch time (`clips_manifest.json`), so changing scores
 later does not renumber clips.
 
@@ -164,13 +170,16 @@ Subtitles: Arial Black, 2-4 words per line, current word in yellow, at ~67% heig
 Names from `glossary.txt` are capitalised (boobie → Boobie). The hook title shows in a dark
 bar at the top for the first 3 seconds.
 
-### Retention editing (v2)
+### Retention editing (v2, v3)
 
 Every effect can be switched on and off in `src/config.py`:
 
 | Setting | Effect |
 |---|---|
 | `EDIT_JUMP_CUTS` | Removes silences longer than 0.5 s between words, keeping 0.15 s around words. Subtitles follow the cuts. |
+| `JUMP_CUT_SMART` | v3: only removes the parts of a gap whose audio is quiet (below `JUMP_CUT_QUIET_DB`, default -42 dBFS). Loud gaps such as driving, shooting or music are kept. Bursts shorter than `JUMP_CUT_IGNORE_BURST` (0.3 s), like footsteps, don't count as action. |
+| `AUDIO_CROSSFADE` | v3: 40 ms audio crossfade at every cut (0 = hard cut). Length and sync are unchanged. |
+| `SUB_STABLE_LAYOUT` | v3: the full subtitle line is laid out from the start, unspoken words are invisible, and the pop is vertical only, so shown words never move. |
 | `EDIT_PUNCH_ZOOMS` | Framing alternates 1.00 → 1.12 → 1.05 every 3.5 s. A change near a jump cut happens instantly on the cut. Off = slow 1.00 → 1.08 zoom. |
 | `EDIT_PEAK_PUNCH` | Short (0.3 s) extra punch-in on the 3 loudest moments. |
 | `EDIT_ANIMATED_SUBS` | Words pop in as they are spoken, UPPERCASE, current word yellow; names green and strong words red (max 2 per line). |
