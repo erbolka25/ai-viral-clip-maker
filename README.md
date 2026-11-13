@@ -1,5 +1,9 @@
 # AI Viral Clip Maker
 
+[![tests](https://github.com/erbolka25/ai-viral-clip-maker/actions/workflows/tests.yml/badge.svg)](https://github.com/erbolka25/ai-viral-clip-maker/actions/workflows/tests.yml)
+![Python 3.13](https://img.shields.io/badge/python-3.13-blue)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Turn one long video into a batch of **vertical, subtitled, fast-paced clips** ready for
 YouTube Shorts, TikTok and Instagram Reels — automatically.
 
@@ -173,6 +177,19 @@ Everything else is in [`src/config.py`](src/config.py):
 `SOURCE_SUBTITLE_BAND` in `src/renderer.py` blurs a band of burned-in subtitles in the source.
 Set it to `None` for a clean source.
 
+## Tests
+
+Pure pipeline logic is covered by a pytest suite that runs on synthetic data, without video, FFmpeg,
+Whisper models or API keys. It covers sentence-boundary snapping, smart jump-cut planning with generated WAV
+audio, moment validation, glossary capitalisation, hook titles and `.ass` subtitle generation.
+
+```powershell
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+GitHub Actions runs the suite on every push (Python 3.13).
+
 ## Design decisions
 
 ### Hotwords instead of `initial_prompt`
@@ -220,6 +237,7 @@ src/
   subtitles.py        animated .ass subtitles and hook title
   renderer.py         FFmpeg 9:16 render of one clip
   render.py           batch / single-clip render CLI
+tests/                pytest suite (synthetic data only)
 glossary.txt          hotwords for Whisper
 .env.example          template for secrets
 ```
