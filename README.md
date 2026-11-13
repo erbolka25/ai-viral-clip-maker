@@ -148,13 +148,14 @@ editing them fixes typos in the clip.
 
 | Command | Effect |
 |---|---|
-| `python -m src.render` | Top 10 by score → `output/gta6_clip_01..10.mp4` + `clips_summary.md` (asks before overwriting) |
+| `python -m src.render` | Top 10 by score → `output/v2/gta6_clip_01..10.mp4` + `clips_summary.md` (asks before overwriting) |
 | `python -m src.render -y` | Same, overwrite without asking |
 | `python -m src.render --top 5` | Only the top 5 |
 | `python -m src.render --clip N` | Re-render clip N from the current `highlights.json` |
 | `python -m src.render --test` | Top moment → `data/test/test_clip.mp4` + 3 PNG frames |
 
-Clip numbers are fixed at batch time (`output/clips_manifest.json`), so changing scores
+Clips go to `output/<RENDER_VERSION>/` (now `v2`; the first version is kept in `output/v1/`).
+Clip numbers are fixed at batch time (`clips_manifest.json`), so changing scores
 later does not renumber clips.
 
 Look: center crop to 1080x1920, slow zoom 1.00 → 1.08, source frame rate (23.976),
@@ -162,6 +163,24 @@ contrast 1.05 / saturation 1.1, loudness normalised to -14 LUFS, H.264 + AAC.
 Subtitles: Arial Black, 2-4 words per line, current word in yellow, at ~67% height.
 Names from `glossary.txt` are capitalised (boobie → Boobie). The hook title shows in a dark
 bar at the top for the first 3 seconds.
+
+### Retention editing (v2)
+
+Every effect can be switched on and off in `src/config.py`:
+
+| Setting | Effect |
+|---|---|
+| `EDIT_JUMP_CUTS` | Removes silences longer than 0.5 s between words, keeping 0.15 s around words. Subtitles follow the cuts. |
+| `EDIT_PUNCH_ZOOMS` | Framing alternates 1.00 → 1.12 → 1.05 every 3.5 s. A change near a jump cut happens instantly on the cut. Off = slow 1.00 → 1.08 zoom. |
+| `EDIT_PEAK_PUNCH` | Short (0.3 s) extra punch-in on the 3 loudest moments. |
+| `EDIT_ANIMATED_SUBS` | Words pop in as they are spoken, UPPERCASE, current word yellow; names green and strong words red (max 2 per line). |
+| `EDIT_HOOK_ANIMATION` | The hook title pops in, stays 2.5 s, then fades out. |
+| `EDIT_PROGRESS_BAR` | Thin yellow bar at the top that fills over the clip. |
+| `EDIT_CLEAN_ENDING` | The clip ends 0.3 s after the last word. |
+
+Cut points are snapped to whole video frames, so audio and video are cut at the same
+instants. Audio and video durations match exactly in every v2 clip. No music, sound
+effects or speed changes are added.
 
 **Source subtitles:** the source video has burned-in Russian subtitles at the bottom. That
 band is blurred and darkened in every clip (`SOURCE_SUBTITLE_BAND` in `src/renderer.py`;
