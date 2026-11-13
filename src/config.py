@@ -25,6 +25,9 @@ TRANSCRIPT_TXT: Path = DATA_DIR / "transcript.txt"
 # Names / slang Whisper should spell correctly (one term per line).
 GLOSSARY_TXT: Path = PROJECT_ROOT / "glossary.txt"
 
+# Phase 2: LLM-selected viral moments (user-editable).
+HIGHLIGHTS_JSON: Path = DATA_DIR / "highlights.json"
+
 # Scratch area for model comparisons / experiments.
 TEST_DIR: Path = DATA_DIR / "test"
 
