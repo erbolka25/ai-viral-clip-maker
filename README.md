@@ -143,6 +143,10 @@ editing them fixes typos in the clip.
   moments and removes overlaps (> 5 s, the lower score loses).
 - If the transcript is too big for one request, it is split into overlapping chunks.
 - The command refuses to overwrite an existing `highlights.json` (your edits) unless you pass `-y`.
+- **More moments:** `python -m src.highlights --more` asks the LLM for up to 10 NEW moments
+  outside all existing ones. It applies the same validation, keeps only moments with no overlap
+  and score ≥ 7 (`--min-score`), appends them and never changes existing moments. A backup is
+  made first. Then run `python -m src.render --new`.
 - **Sentence boundaries:** moments start at a sentence start and end at a sentence end,
   staying 20-60 s long before jump cuts. New runs do this automatically. For an existing file, run
   `python -m src.highlights --fix-boundaries`. It keeps your edited words, adds transcript
@@ -158,6 +162,7 @@ editing them fixes typos in the clip.
 | `python -m src.render -y` | Same, overwrite without asking |
 | `python -m src.render --top 5` | Only the top 5 |
 | `python -m src.render --clip N` | Re-render clip N from the current `highlights.json` |
+| `python -m src.render --new` | Render moments that are not clips yet (score ≥ `MIN_NEW_SCORE`, 7) as the next clip numbers |
 | `python -m src.render --test` | Top moment → `data/test/test_clip.mp4` + 3 PNG frames |
 
 Clips go to `output/<RENDER_VERSION>/` (now `v3`; earlier versions stay in `output/v1/` and `output/v2/`).

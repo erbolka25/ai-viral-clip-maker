@@ -583,6 +583,50 @@ def detect(transcript: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, 
     return moments, stats
 
 
+def _overlap(a: dict[str, Any], b: tuple[float, float]) -> float:
+    return min(float(a["end"]), b[1]) - max(float(a["start"]), b[0])
+
+
+def find_more(data: dict[str, Any], transcript: dict[str, Any], max_new: int,
+              min_score: int) -> dict[str, Any]:
+    """Ask the LLM for NEW moments outside all existing ones.
+
+    Existing moments are never changed. New ones go through the same
+    validation as a normal run (20-60 s, sentence boundaries, words attached
+    in code); only those that overlap nothing and score >= min_score are kept.
+    """
+    taken = sorted((float(m["start"]), float(m["end"])) for m in data["moments"])
+    used = ", ".join(f"{int(a)}-{int(math.ceil(b))}" for a, b in taken)
+    extra = (
+        f"\nThese time ranges are ALREADY USED: {used}.\n"
+        "New moments must NOT overlap any of them, not even partly.\n"
+        "Quality over quantity: only return moments you would honestly score 7 or "
+        "higher. Returning fewer moments, even zero, is fine.\n"
+    )
+    units = speech_units([s for s in transcript["segments"] if s["text"].strip()])
+    raw, res = ask_llm(compact_lines(units), 1, max_new, extra, RateLimiter())
+    candidates = postprocess(raw, transcript)
+
+    kept: list[dict[str, Any]] = []
+    rejected: list[str] = []
+    for m in sorted(candidates, key=lambda m: (-m["score"], m["start"])):
+        blocked = taken + [(k["start"], k["end"]) for k in kept]
+        worst = max((_overlap(m, r) for r in blocked), default=0.0)
+        if worst > 0:
+            rejected.append(f"[{m['score']}] {m['hook_title']!r}: overlaps an existing moment by {worst:.1f}s")
+        elif m["score"] < min_score:
+            rejected.append(f"[{m['score']}] {m['hook_title']!r}: score below {min_score}")
+        else:
+            kept.append(m)
+
+    next_id = max((int(m["id"]) for m in data["moments"]), default=0) + 1
+    for m in sorted(kept, key=lambda m: m["start"]):
+        m["id"] = next_id
+        next_id += 1
+    return {"raw": raw, "validated": candidates, "kept": kept, "rejected": rejected,
+            "tokens": (res.input_tokens, res.output_tokens), "seconds": res.elapsed_seconds}
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -m src.highlights", description=__doc__.splitlines()[0])
     p.add_argument("-y", "--yes", action="store_true",
@@ -590,9 +634,47 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--fix-boundaries", action="store_true",
                    help="move existing moments to sentence boundaries (keeps your word edits; "
                         "backs up highlights.json first)")
+    p.add_argument("--more", action="store_true",
+                   help="add NEW moments that do not overlap existing ones (existing moments "
+                        "are not changed; backs up highlights.json first)")
+    p.add_argument("--max-new", type=int, default=10, help="--more: ask for up to N moments")
+    p.add_argument("--min-score", type=int, default=config.MIN_NEW_SCORE,
+                   help=f"--more: keep only scores >= this (default {config.MIN_NEW_SCORE})")
     args = p.parse_args(argv)
 
     out = config.HIGHLIGHTS_JSON
+    if args.more:
+        if not out.is_file():
+            print(f"{out} not found - run: python -m src.highlights")
+            return 1
+        data = json.loads(out.read_text(encoding="utf-8"))
+        backup = out.with_name(f"highlights.backup-{time.strftime('%Y%m%d-%H%M%S')}.json")
+        backup.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        transcript = load_transcript()
+        try:
+            result = find_more(data, transcript, args.max_new, args.min_score)
+        except LLMError as exc:
+            print(f"Error: {exc}")
+            return 1
+        (config.DATA_DIR / "highlights_raw_more.json").write_text(
+            json.dumps(result["raw"], indent=2, ensure_ascii=False), encoding="utf-8")
+        data["moments"] += result["kept"]
+        problems = validate(data["moments"], float(transcript["duration"]))
+        out.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"LLM proposed {len(result['raw'])}, {len(result['validated'])} passed validation, "
+              f"{len(result['kept'])} kept (score >= {args.min_score}, no overlap). "
+              f"Tokens in/out {result['tokens'][0]}/{result['tokens'][1]}, {result['seconds']:.1f}s")
+        for m in result["kept"]:
+            print(f"  + #{m['id']} [{m['score']}] {m['start']:.1f}-{m['end']:.1f} ({m['duration']:.1f}s) "
+                  f"{m['category']}: {m['hook_title']!r}")
+        for line in result["rejected"]:
+            print(f"  - {line}")
+        print(f"Saved {out} (backup: {backup.name})")
+        if problems:
+            print("Validation problems:\n  " + "\n  ".join(problems))
+            return 2
+        return 0
+
     if args.fix_boundaries:
         if not out.is_file():
             print(f"{out} not found - run: python -m src.highlights")

@@ -88,6 +88,9 @@ SENTENCE_MAX_SHIFT: float = 6.0
 MOMENT_MIN_SECONDS: float = 20.0
 MOMENT_MAX_SECONDS: float = 60.0
 
+# "python -m src.highlights --more" keeps only new moments scoring at least this.
+MIN_NEW_SCORE: int = 7
+
 
 # --- Rendering / retention editing (Phase 3) ---------------------------------
 # Clips are written to output/<RENDER_VERSION>/ so older versions are kept.

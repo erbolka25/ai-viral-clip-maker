@@ -4,6 +4,7 @@
     python -m src.render --top 5         # top 5 instead
     python -m src.render --clip 3        # re-render clip 3 after editing highlights.json
     python -m src.render --test          # top moment -> data/test/test_clip.mp4 (+ frames)
+    python -m src.render --new           # render new moments (score >= 7) as clip 11, 12, ...
     python -m src.render -y              # batch: overwrite existing clips without asking
 
 <version> is config.RENDER_VERSION (e.g. v2); older versions stay in their own
@@ -62,7 +63,9 @@ def write_summary(manifest: list[dict[str, Any]], moments: list[dict[str, Any]])
         "| # | File | Hook title | Title | Category | Score | Source start - end | Source length | Clip length |",
         "|---|---|---|---|---|---|---|---|---|",
     ]
-    for e in manifest:
+    # Sorted by score (best first); ties keep clip order.
+    ordered = sorted(manifest, key=lambda e: (-by_id.get(e["moment_id"], {}).get("score", 0), e["clip"]))
+    for e in ordered:
         m = by_id.get(e["moment_id"])
         exists = (OUT_DIR / e["file"]).is_file()
         name = e["file"] if exists else f"{e['file']} (not rendered)"
@@ -155,6 +158,32 @@ def render_single(clip: int) -> int:
     return 0
 
 
+def render_new(min_score: int) -> int:
+    """Render moments that are not clips yet (score >= min_score) as the next
+    clip numbers, best score first. Existing clips are not touched."""
+    manifest = _load_manifest()
+    if manifest is None:
+        print("No clips_manifest.json yet - run the batch first: python -m src.render")
+        return 1
+    moments = load_moments()
+    done = {e["moment_id"] for e in manifest}
+    todo = sorted((m for m in moments if m["id"] not in done and m["score"] >= min_score),
+                  key=lambda m: (-m["score"], m["start"]))
+    if not todo:
+        print(f"No new moments with score >= {min_score}.")
+        return 0
+    n = max(e["clip"] for e in manifest)
+    for m in todo:
+        n += 1
+        entry = {"clip": n, "file": CLIP_NAME.format(n), "moment_id": m["id"]}
+        manifest.append(entry)
+        _render_entry(entry, m)
+        MANIFEST.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    write_summary(manifest, moments)
+    print(f"Summary: {SUMMARY}")
+    return 0
+
+
 def render_test(hook: bool) -> int:
     best = max(load_moments(), key=lambda m: m["score"])
     out = config.TEST_DIR / "test_clip.mp4"
@@ -175,6 +204,9 @@ def main(argv: list[str] | None = None) -> int:
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--clip", type=int, metavar="N", help="re-render clip N (gta6_clip_NN.mp4)")
     mode.add_argument("--test", action="store_true", help="render the top moment to data/test/")
+    mode.add_argument("--new", action="store_true",
+                      help=f"render moments that are not clips yet (score >= {config.MIN_NEW_SCORE}) "
+                           "as the next clip numbers")
     p.add_argument("--top", type=int, default=10, help="number of clips in a batch (default 10)")
     p.add_argument("-y", "--yes", action="store_true", help="batch: overwrite existing clips")
     p.add_argument("--no-hook", action="store_true", help="--test only: leave out the hook title")
@@ -187,6 +219,8 @@ def main(argv: list[str] | None = None) -> int:
             return render_test(hook=not args.no_hook)
         if args.clip is not None:
             return render_single(args.clip)
+        if args.new:
+            return render_new(config.MIN_NEW_SCORE)
         return render_batch(args.top, args.yes)
     except (FileNotFoundError, RenderError, KeyError, ValueError) as exc:
         print(f"\nError: {exc}")
