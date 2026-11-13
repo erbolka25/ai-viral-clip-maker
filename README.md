@@ -97,7 +97,10 @@ flowchart LR
    python -m src.llm            # sanity check: prints model, latency, tokens, rate limits
    ```
 
-4. **Add your video** as `input\gta6.mp4`. The path is set by `INPUT_VIDEO` in `src/config.py`.
+4. **Add your video.** Either put it at `input\gta6.mp4` (the default) or point to it with
+   `--input`, for example `python -m src.main --input D:\videos\my_stream.mp4`. The path is saved in
+   `data\video_info.json`, and later steps (`src.highlights`, `src.render`) use the same video
+   automatically.
 
 5. *(Optional)* Add names and terms Whisper should spell correctly to `glossary.txt`, one per line.
 
@@ -115,6 +118,7 @@ python -m src.render            # 3. render the top 10 -> output\v3\*.mp4 + clip
 
 | Command | Effect |
 |---|---|
+| `python -m src.main --input PATH` | Use another source video (default `input\gta6.mp4`) |
 | `python -m src.main --model small` | Faster, less accurate transcription (`tiny` … `large-v3`) |
 | `python -m src.main --language en` | Force the source language instead of auto-detecting it |
 | `python -m src.main --skip-existing` | Reuse finished steps and run only missing ones |
@@ -228,7 +232,9 @@ glossary.txt          hotwords for Whisper
   with no dialogue can be missed.
 - **Center crop.** The 9:16 frame is a fixed center crop, so action at the edges of a 16:9 frame can be cut off.
 - **CPU speed.** `medium` on CPU takes roughly as long as the video itself. A GPU is much faster.
-- **One video at a time.** The input path is fixed in `config.py`.
+- **One video per project folder.** `data/` and `output/` hold the results of a single video. Switching to
+  another video with `--input` requires `-y`, which overwrites `data/`, so move the old results away first if you want
+  to keep them.
 - **Free-tier rate limits.** Long transcripts are split into overlapping chunks to stay under Groq's
   tokens-per-minute limit, which makes detection slower.
 
@@ -238,7 +244,7 @@ glossary.txt          hotwords for Whisper
 - [ ] **Visual analysis** using scene-change detection, motion energy and a vision model, to score moments
       without dialogue and to track the subject instead of center-cropping.
 - [ ] **Faster transcription** with `large-v3-turbo`, batched inference and GPU-first defaults.
-- [ ] Input video as a CLI argument and batch processing of several videos.
+- [ ] Batch processing of several videos, each with its own `data/` and `output/` folders.
 - [ ] Optional translated subtitles.
 
 ## Responsible use

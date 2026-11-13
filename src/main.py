@@ -7,6 +7,7 @@ Run from the project root:
     python -m src.main --skip-existing   # reuse existing outputs
     python -m src.main --model small     # use a different Whisper model
     python -m src.main --no-glossary     # disable glossary hotwords
+    python -m src.main --input D:/videos/talk.mp4   # use another source video
 """
 
 from __future__ import annotations
@@ -78,16 +79,36 @@ def step_dependencies() -> None:
         raise DependencyError("Install the missing dependencies above and try again.")
 
 
-def step_input() -> None:
+def previous_source() -> Path | None:
+    """Source video recorded in data/video_info.json by an earlier run."""
+    if not config.VIDEO_INFO_JSON.is_file():
+        return None
+    try:
+        path = json.loads(config.VIDEO_INFO_JSON.read_text(encoding="utf-8")).get("path")
+    except (OSError, ValueError):
+        return None
+    return Path(path).resolve() if path else None
+
+
+def step_input(policy: str) -> None:
     console.rule("[bold]2. Input video")
     config.ensure_dirs()
     video = config.INPUT_VIDEO
     if not video.is_file():
-        raise FileNotFoundError(
-            "Input video not found.\n"
-            f"  Expected: {video}\n"
+        hint = (
             f"  Place your source video in the '{config.INPUT_DIR.name}' folder "
-            f"and name it '{video.name}'."
+            f"and name it '{video.name}', or pass --input PATH."
+            if video == config.DEFAULT_INPUT_VIDEO else "  Check the --input path."
+        )
+        raise FileNotFoundError(f"Input video not found.\n  Expected: {video}\n{hint}")
+    # data/ holds the results of ONE video. Reusing them for another video
+    # would mix transcripts and clips, so switching videos requires -y.
+    previous = previous_source()
+    if previous is not None and previous != video.resolve() and policy != Overwrite.YES:
+        raise ValueError(
+            f"data/ belongs to another video ({previous.name}).\n"
+            f"  Re-run with -y to process {video.name} and overwrite data/, "
+            "or move data/ and output/ away first."
         )
     if video.stat().st_size == 0:
         raise ValueError(f"Input video is empty (0 bytes): {video}")
@@ -219,6 +240,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     g = p.add_mutually_exclusive_group()
     g.add_argument("-y", "--yes", action="store_true", help="overwrite existing outputs")
     g.add_argument("--skip-existing", action="store_true", help="reuse existing outputs")
+    p.add_argument("--input", metavar="PATH", default=None,
+                   help="source video (default: input/gta6.mp4)")
     p.add_argument("--model", default=config.WHISPER_MODEL,
                    help="Whisper model: tiny/base/small/medium/large-v3 "
                         f"(default: {config.WHISPER_MODEL})")
@@ -234,11 +257,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     policy = Overwrite.YES if args.yes else Overwrite.SKIP if args.skip_existing else Overwrite.ASK
+    if args.input:
+        config.INPUT_VIDEO = Path(args.input).expanduser().resolve()
 
-    console.print(Panel.fit("[bold magenta]GTA 6 Viral Clip Maker[/] - Phase 1: Video processing"))
+    console.print(Panel.fit("[bold magenta]AI Viral Clip Maker[/] - Phase 1: Video processing"))
     try:
         step_dependencies()
-        step_input()
+        step_input(policy)
         info = step_inspect(policy)
         step_audio(policy)
         glossary = resolve_glossary(args.glossary, args.no_glossary)

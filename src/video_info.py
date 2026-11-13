@@ -115,4 +115,4 @@ def save_video_info(info: dict[str, Any], output_path: Path) -> Path:
 if __name__ == "__main__":  # Quick manual test: python -m src.video_info
     from src import config
 
-    print(json.dumps(inspect_video(config.INPUT_VIDEO), indent=2))
+    print(json.dumps(inspect_video(config.source_video()), indent=2))

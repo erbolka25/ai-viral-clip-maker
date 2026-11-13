@@ -59,7 +59,7 @@ def source_info() -> SourceInfo:
         info = json.loads(config.VIDEO_INFO_JSON.read_text(encoding="utf-8"))
     else:
         from src.video_info import inspect_video
-        info = inspect_video(config.INPUT_VIDEO)
+        info = inspect_video(config.source_video())
     return SourceInfo(int(info["width"]), int(info["height"]),
                       float(info["duration_seconds"]), float(info["fps"]))
 
@@ -169,8 +169,9 @@ def render_plan(
 ) -> Path:
     """Render ``plan`` to ``out_path`` (overwrites it). ``ass_path`` times
     must be on the clip timeline (0 = first frame of the clip)."""
-    if not config.INPUT_VIDEO.is_file():
-        raise FileNotFoundError(f"Source video not found: {config.INPUT_VIDEO}")
+    source = config.source_video()
+    if not source.is_file():
+        raise FileNotFoundError(f"Source video not found: {source}")
     src = source_info()
     end = plan.ss + plan.segments[-1][1]
     if not (0 <= plan.ss < end <= src.duration + 0.05):
@@ -186,7 +187,7 @@ def render_plan(
         str(ffmpeg), "-hide_banner", "-loglevel", "error", "-y",
         "-ss", f"{plan.ss - _preroll(plan, src.fps):.4f}",
         "-t", f"{plan.segments[-1][1] + _preroll(plan, src.fps) + 0.1:.4f}",
-        "-i", str(config.INPUT_VIDEO.resolve()),
+        "-i", str(source.resolve()),
         "-filter_complex", graph,
         "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", preset, "-crf", str(crf),

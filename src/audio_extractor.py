@@ -74,5 +74,5 @@ def extract_audio(
 
 
 if __name__ == "__main__":  # Quick manual test: python -m src.audio_extractor
-    out = extract_audio(config.INPUT_VIDEO, config.AUDIO_WAV)
+    out = extract_audio(config.source_video(), config.AUDIO_WAV)
     print(f"Audio written to {out} ({out.stat().st_size / 1_048_576:.1f} MB)")

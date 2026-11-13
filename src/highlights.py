@@ -709,7 +709,7 @@ def main(argv: list[str] | None = None) -> int:
 
     problems = validate(moments, float(transcript["duration"]))
     payload = {
-        "source": config.INPUT_VIDEO.name,
+        "source": config.source_video().name,
         "video_duration": transcript["duration"],
         "model": stats.get("model") or config.LLM_MODELS.get("groq"),
         "note": "Edit 'words' to fix subtitle typos, then re-render with: python -m src.render --clip N",

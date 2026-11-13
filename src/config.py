@@ -16,7 +16,10 @@ OUTPUT_DIR: Path = PROJECT_ROOT / "output"
 DATA_DIR: Path = PROJECT_ROOT / "data"
 
 # Phase 1 inputs / outputs
-INPUT_VIDEO: Path = INPUT_DIR / "gta6.mp4"
+# Default source video. Override with: python -m src.main --input PATH
+# (the chosen path is stored in data/video_info.json and reused by later steps).
+DEFAULT_INPUT_VIDEO: Path = INPUT_DIR / "gta6.mp4"
+INPUT_VIDEO: Path = DEFAULT_INPUT_VIDEO
 VIDEO_INFO_JSON: Path = DATA_DIR / "video_info.json"
 AUDIO_WAV: Path = DATA_DIR / "audio.wav"
 TRANSCRIPT_JSON: Path = DATA_DIR / "transcript.json"
@@ -155,6 +158,29 @@ PROGRESS_BAR_HEIGHT: int = 12
 # 6. Clean ending: cut the clip END_PAD seconds after the last spoken word.
 EDIT_CLEAN_ENDING: bool = True
 END_PAD: float = 0.3
+
+
+def source_video() -> Path:
+    """The source video of the current project.
+
+    ``python -m src.main --input PATH`` records the video's path in
+    data/video_info.json; later steps (render, highlights) read it from there,
+    so they always use the same video. Falls back to ``INPUT_VIDEO``.
+    """
+    import json
+
+    if VIDEO_INFO_JSON.is_file():
+        try:
+            path = json.loads(VIDEO_INFO_JSON.read_text(encoding="utf-8")).get("path")
+        except (OSError, ValueError):
+            path = None
+        if path:
+            candidate = Path(path)
+            if not candidate.is_absolute():
+                candidate = PROJECT_ROOT / candidate
+            if candidate.is_file():
+                return candidate
+    return INPUT_VIDEO
 
 
 def ensure_dirs() -> None:
