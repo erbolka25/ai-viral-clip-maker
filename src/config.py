@@ -40,6 +40,40 @@ WHISPER_CPU_COMPUTE_TYPE: str = "int8"
 WHISPER_GPU_COMPUTE_TYPE: str = "float16"
 
 
+# --- LLM (Phase 2) ---------------------------------------------------------
+# Secrets live in .env (never committed); see .env.example.
+ENV_FILE: Path = PROJECT_ROOT / ".env"
+
+# LLM_PROVIDER in .env selects one of these; "groq" when unset.
+LLM_DEFAULT_PROVIDER: str = "groq"
+
+# Model used for each provider.
+#  groq: gpt-oss-120b - Groq's strongest production model: 131K context,
+#        strict JSON-schema output, reasoning model. (Llama 3.x models on Groq
+#        were shut down for free/dev tiers on 2026-08-16.)
+#  anthropic: Claude Opus 5.5 - not used yet.
+LLM_MODELS: dict[str, str] = {
+    "groq": "openai/gpt-oss-120b",
+    "anthropic": "claude-opus-5-5",
+}
+
+# Environment variable holding each provider's API key.
+LLM_API_KEY_VARS: dict[str, str] = {
+    "groq": "GROQ_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
+
+# Default output-token cap per request. Kept modest on Groq because the free
+# tier allows only ~8K tokens per minute (input + output combined).
+LLM_MAX_OUTPUT_TOKENS: dict[str, int] = {
+    "groq": 4096,
+    "anthropic": 16000,
+}
+
+# gpt-oss models think before answering; "low" | "medium" | "high".
+GROQ_REASONING_EFFORT: str = "medium"
+
+
 def ensure_dirs() -> None:
     """Create the working directories if they do not exist yet."""
     for directory in (INPUT_DIR, OUTPUT_DIR, DATA_DIR):

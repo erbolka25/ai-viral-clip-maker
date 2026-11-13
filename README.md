@@ -89,6 +89,25 @@ Results:
 - `data/test/comparison_<excerpt>.md` (`comparison_<excerpt>_noglossary.md`) — side-by-side table with name counts
 - `data/test/timings.json` — processing time per run
 
+## LLM provider (Phase 2)
+
+Copy `.env.example` to `.env` and fill in your key (`.env` is git-ignored):
+
+```
+LLM_PROVIDER=groq          # or: anthropic
+GROQ_API_KEY=...
+```
+
+Model names per provider are set in `src/config.py` (`LLM_MODELS`); Groq defaults to
+`openai/gpt-oss-120b`. All code calls `src.llm.complete(prompt, json_mode=...)` and never
+depends on the provider. Check the setup with:
+
+```powershell
+python -m src.llm      # asks the model for {"ok": true}; prints model, time, tokens, rate limits
+```
+
+The Groq free tier allows about 8K tokens per minute for `gpt-oss-120b`, input and output combined.
+
 ## Outputs
 
 - `data/video_info.json` — duration, resolution, FPS, codecs, file size

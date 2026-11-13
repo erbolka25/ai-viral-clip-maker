@@ -2,3 +2,8 @@
 # External (not pip): FFmpeg + FFprobe  ->  winget install Gyan.FFmpeg
 faster-whisper>=1.1
 rich>=13
+
+# Phase 2 - LLM
+python-dotenv>=1.0
+groq>=0.30
+# anthropic>=1.0   # only needed when LLM_PROVIDER=anthropic
